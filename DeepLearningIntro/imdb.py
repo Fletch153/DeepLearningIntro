@@ -20,8 +20,8 @@ tf.set_random_seed(89)
 from tensorflow.python.keras import backend as K
 
 session_conf = tf.ConfigProto(
-      intra_op_parallelism_threads=1,
-      inter_op_parallelism_threads=1)
+      intra_op_parallelism_threads=4,
+      inter_op_parallelism_threads=4)
 
 #Force Tensorflow to use a single thread
 sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
@@ -59,12 +59,12 @@ label_set = []
 prediciton_time_set = []
 for i in range(0, required_data_scaled.shape[0] - 72, 72):
     features_set.append(required_data_scaled[i:i+72])
-    label_set.append(request_result_scaled[i+72+6, 0]);
+    label_set.append(request_result_scaled[i+72+24, 0]);
     prediciton_time_set.append(request_result_scaled[i + 72, 0]);
 x, y, z = np.array(features_set), np.array(label_set), np.array(prediciton_time_set)
 
 #split the data into training and test
-train_quantity = 32
+train_quantity = 48
 
 test_x = np.split(x, [train_quantity])[0]
 test_y = np.split(y, [train_quantity])[0]
@@ -90,7 +90,7 @@ model.add(Dense(units = 1))
 #compile and fit
 model.compile(optimizer = 'adam', loss = 'mae')
 
-history = model.fit(train_x, train_y, epochs = 100, batch_size = 10, validation_data=(test_x, test_y), verbose=2, shuffle=False)
+history = model.fit(train_x, train_y, epochs = 5, batch_size = 10, validation_data=(test_x, test_y), verbose=2, shuffle=False)
 
 #plot the training results
 plt.plot(history.history['loss'], label='train')
@@ -108,6 +108,7 @@ normalized_prediction_times = result_scaler.inverse_transform(test_z.reshape(-1,
 plt.figure(figsize=(10,6))
 plt.plot(normalized_test_values, color='blue', label='Actual Bitcoin Price')
 plt.plot(normalizsed_predictions, color='red', label='Predicted Bitcoin Price')
+plt.plot(normalized_prediction_times, color='green', label='Price at Prediction')
 plt.title('Bitcoin Price Prediction')
 plt.xlabel('Date')
 plt.ylabel('Bitcoin Price')
