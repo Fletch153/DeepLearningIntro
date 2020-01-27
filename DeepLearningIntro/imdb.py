@@ -1,80 +1,170 @@
-from tensorflow.python import keras
-from tensorflow.python.keras.datasets import imdb
-import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
-(train_data, train_labels), (test_data, test_labels) = imdb.load_data(num_words=10000)
+import numpy as np
+import tensorflow as tf
+import random as rn
+import os
 
+os.environ['PYTHONHASHSEED'] = '0'
 
-def vectorize_sequences(sequences, dimension=10000):
-    results = np.zeros((len(sequences), dimension))
-    for i, sequence in enumerate(sequences):
-        results[i, sequence] = 1.  # set specific indices of results[i] to 1s
-    return results
+# Setting the seed for numpy-generated random numbers
+np.random.seed(37)
 
+# Setting the seed for python random numbers
+rn.seed(1254)
 
-x_train = vectorize_sequences(train_data)
-x_test = vectorize_sequences(test_data)
+# Setting the graph-level random seed.
+tf.set_random_seed(89)
 
-y_train = np.asarray(train_labels).astype('float32')
-y_test = np.asarray(test_labels).astype('float32')
+from tensorflow.python.keras import backend as K
 
-x_val = x_train[:10000]
-partial_x_train = x_train[10000:]
+session_conf = tf.ConfigProto(
+      intra_op_parallelism_threads=1,
+      inter_op_parallelism_threads=1)
 
-y_val = y_train[:10000]
-partial_y_train = y_train[10000:]
+#Force Tensorflow to use a single thread
+sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
 
-print(len(x_train))
+K.set_session(sess)
 
-model = keras.models.Sequential()
-model.add(keras.layers.Dense(16, activation='relu', input_shape=(10000,)))
-model.add(keras.layers.Dense(16, activation='relu'))
-model.add(keras.layers.Dense(1, activation='sigmoid'))
-
-model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
-
-history = model.fit(partial_x_train, partial_y_train, epochs=1, batch_size=512, validation_data=(x_val,y_val))
-
-history_dict = history.history
-print(history_dict.keys())
-
-loss_values = history_dict['loss']
-acc_values = history_dict['acc']
-val_loss_values = history_dict['val_loss']
-val_acc_values = history_dict['val_acc']
+# Rest of the code follows from here on ...
 
 
-epochs = range(1, len(acc_values) + 1)
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.layers import Dense
+from tensorflow.python.keras.layers import LSTM
+from tensorflow.python.keras.layers import Dropout
 
-plt.plot(epochs, loss_values, 'bo', label='Training loss')
-plt.plot(epochs, val_loss_values, 'b', label='Validation loss')
-plt.title('Training and Validation loss')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend
 
+
+#load the data
+raw_data = pd.read_csv("new_data.csv", names=["openTime", "closeTime", "baseAsset", "quoteAsset", "open", "high", "low", "close", "volume", "quoteAssetVolume",	"numberOfTrades", "takerBuyBaseAssetVolume", "takerBuyQuoteAssetVolume", "takerBuyBaseAssetChange",	"takerBuyQuoteAssetChange",	"volumeChange",	"quoteAssetVolumeChange", "openChange",	"highChange", "lowChange", "closeChange", "numberOfTradesChange"]);
+
+# extract data we want
+required_data = raw_data[["open", "high", "low", "close", "volume", "quoteAssetVolume", "numberOfTrades", "takerBuyBaseAssetVolume", "takerBuyQuoteAssetVolume"]];
+
+#init the scaler
+scaler = MinMaxScaler(feature_range=(0,1));
+result_scaler = MinMaxScaler(feature_range=(0,1))
+
+#scale the extracted data
+required_data_scaled = scaler.fit_transform(required_data);
+request_result_scaled = result_scaler.fit_transform(np.array(required_data["close"]).reshape(-1,1))
+
+#transform the data
+features_set = []
+label_set = []
+prediciton_time_set = []
+for i in range(0, required_data_scaled.shape[0] - 72, 72):
+    features_set.append(required_data_scaled[i:i+72])
+    label_set.append(request_result_scaled[i+72+6, 0]);
+    prediciton_time_set.append(request_result_scaled[i + 72, 0]);
+x, y, z = np.array(features_set), np.array(label_set), np.array(prediciton_time_set)
+
+#split the data into training and test
+train_quantity = 32
+
+test_x = np.split(x, [train_quantity])[0]
+test_y = np.split(y, [train_quantity])[0]
+test_z = np.split(z, [train_quantity])[0]
+
+train_x = np.split(x, [train_quantity])[1]
+train_y = np.split(y, [train_quantity])[1]
+train_z = np.split(z, [train_quantity])[1]
+
+
+#create the model
+model = Sequential()
+
+#add the layers
+model.add(LSTM(units=50, return_sequences=True, input_shape=(train_x.shape[1], train_x.shape[2])))
+model.add(Dropout(0.2))
+
+model.add(LSTM(units=100))
+model.add(Dropout(0.2))
+
+model.add(Dense(units = 1))
+
+#compile and fit
+model.compile(optimizer = 'adam', loss = 'mae')
+
+history = model.fit(train_x, train_y, epochs = 100, batch_size = 10, validation_data=(test_x, test_y), verbose=2, shuffle=False)
+
+#plot the training results
+plt.plot(history.history['loss'], label='train')
+plt.plot(history.history['val_loss'], label='test')
+plt.legend()
 plt.show()
 
-plt.clf()
+#make a prediction
+predictions = model.predict(test_x)
+normalizsed_predictions = result_scaler.inverse_transform(predictions)
+normalized_test_values = result_scaler.inverse_transform(test_y.reshape(-1, 1))
+normalized_prediction_times = result_scaler.inverse_transform(test_z.reshape(-1, 1))
 
-plt.plot(epochs, acc_values, 'bo', label='Training Accuracy')
-plt.plot(epochs, val_acc_values, 'b', label='Validation Accuracy')
-plt.title('Training and Validation accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend
+#plot the test label(the actual price) against the predicted price
+plt.figure(figsize=(10,6))
+plt.plot(normalized_test_values, color='blue', label='Actual Bitcoin Price')
+plt.plot(normalizsed_predictions, color='red', label='Predicted Bitcoin Price')
+plt.title('Bitcoin Price Prediction')
+plt.xlabel('Date')
+plt.ylabel('Bitcoin Price')
+plt.legend()
 plt.show()
 
-model = keras.models.Sequential()
-model.add(keras.layers.Dense(16, activation='relu', input_shape=(10000,)))
-model.add(keras.layers.Dense(16, activation='relu'))
-model.add(keras.layers.Dense(1, activation='sigmoid'))
+correct = 0
+incorrect = 0
+i = 0;
+while i < normalized_test_values.shape[0]:
+    if normalized_test_values[i][0] >= normalized_prediction_times[i][0]:
+        if normalizsed_predictions[i][0] >= normalized_prediction_times[i][0]:
+            correct += 1
+        else:
+            incorrect += 1
+    else:
+        if normalizsed_predictions[i][0] <= normalized_prediction_times[i][0]:
+            correct += 1
+        else:
+            incorrect += 1
+    i += 1
 
-model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
+print("incorrect quantity:" + str(incorrect))
+print("correct quantity:" + str(correct))
+print("correct results:" + str(correct/normalized_test_values.shape[0] * 100));
 
-model.fit(x_train, y_train, epochs=4, batch_size=512)
 
-print("Results:")
-results = model.evaluate(x_test, y_test)
+
+
+
+
+
+
+
+#IGNORE THIS -- MICHAEL TESTING
+#load the data
+raw_data = pd.read_csv("last_three_days.csv", names=["openTime", "closeTime", "baseAsset", "quoteAsset", "open", "high", "low", "close", "volume", "quoteAssetVolume",	"numberOfTrades", "takerBuyBaseAssetVolume", "takerBuyQuoteAssetVolume"]);
+
+# extract data we want
+required_data = raw_data[["open", "high", "low", "close", "volume", "quoteAssetVolume", "numberOfTrades", "takerBuyBaseAssetVolume", "takerBuyQuoteAssetVolume"]];
+
+#init the scaler
+scaler = MinMaxScaler(feature_range=(0,1));
+result_scaler = MinMaxScaler(feature_range=(0,1))
+
+#scale the extracted data
+required_data_scaled = scaler.fit_transform(required_data);
+request_result_scaled = result_scaler.fit_transform(np.array(required_data["close"]).reshape(-1,1))
+
+#transform the data
+features_set = []
+label_set = []
+features_set.append(required_data_scaled[0:72])
+x = np.array(features_set)
+
+predictions = model.predict(x)
+normalizsed_predictions = result_scaler.inverse_transform(predictions)
+
+print(normalizsed_predictions)
 
